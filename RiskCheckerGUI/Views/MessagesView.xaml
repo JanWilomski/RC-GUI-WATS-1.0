@@ -79,14 +79,26 @@
                 
                 <Grid Grid.Row="5" Margin="10,2">
                     <TextBlock Style="{StaticResource LimitStyle}" 
-                               Background="{Binding CapitalUsage.MessageUsagePercent, Converter={StaticResource PercentageToColorConverter}}"
-                               Text="{Binding CapitalUsage.MessageUsagePercent, StringFormat='{0:F1}% of {1}'}" />
+                            Background="{Binding CapitalUsage.MessageUsagePercent, Converter={StaticResource PercentageToColorConverter}}">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0:F1}% of {1}">
+                                <Binding Path="CapitalUsage.MessageUsagePercent" />
+                                <Binding Path="CapitalUsage.MessageLimit" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
                 </Grid>
                 
                 <Grid Grid.Row="6" Margin="10,2">
                     <TextBlock Style="{StaticResource LimitStyle}" 
-                               Background="{Binding CapitalUsage.CapitalUsagePercent, Converter={StaticResource PercentageToColorConverter}}"
-                               Text="{Binding CapitalUsage.CapitalUsagePercent, StringFormat='{0:F1}% of {1}'}" />
+                            Background="{Binding CapitalUsage.CapitalUsagePercent, Converter={StaticResource PercentageToColorConverter}}">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0:F1}% of {1}">
+                                <Binding Path="CapitalUsage.CapitalUsagePercent" />
+                                <Binding Path="CapitalUsage.CapitalLimit" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
                 </Grid>
             </Grid>
         </Grid>

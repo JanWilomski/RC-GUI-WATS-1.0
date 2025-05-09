@@ -10,8 +10,8 @@ namespace RiskCheckerGUI.Services
     {
         private TcpClient _client;
         private NetworkStream _stream;
-        private readonly string _host;
-        private readonly int _port;
+        private string _host;
+        private int _port;
 
         public event EventHandler<LogMessage> LogReceived;
         public event EventHandler<Position> PositionReceived;
@@ -321,5 +321,22 @@ namespace RiskCheckerGUI.Services
             _stream?.Close();
             _client?.Close();
         }
+
+        public void UpdateConnection(string host, int port)
+        {
+            if (_client != null && _client.Connected)
+            {
+                Disconnect();
+            }
+            
+            _host = host ?? throw new ArgumentNullException(nameof(host));
+            _port = port;
+        }
+
+
+
+
     }
+
+
 }

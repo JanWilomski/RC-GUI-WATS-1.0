@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Windows.Data;
 
-namespace RiskCheckerGUI.Helpers
+namespace RiskCheckerGUI.Helpers.Converters
 {
     public class BytesToStringConverter : IValueConverter
     {

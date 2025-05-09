@@ -10,8 +10,8 @@ namespace RiskCheckerGUI.Services
     public class UdpService
     {
         private UdpClient _client;
-        private readonly string _multicastGroup;
-        private readonly int _port;
+        private string _multicastGroup;
+        private int _port;
         private bool _isRunning;
 
         public event EventHandler<LogMessage> LogReceived;
@@ -194,5 +194,16 @@ namespace RiskCheckerGUI.Services
                 _client = null;
             }
         }
+
+        public void UpdateConnection(string multicastGroup, int port)
+            {
+                if (_isRunning)
+                {
+                    Stop();
+                }
+                
+                _multicastGroup = multicastGroup ?? throw new ArgumentNullException(nameof(multicastGroup));
+                _port = port;
+            }
     }
 }
