@@ -1,0 +1,5 @@
+C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\obj\Debug\net8.0-windows\MainWindow.g.cs
+C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\obj\Debug\net8.0-windows\App.g.cs
+C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\obj\Debug\net8.0-windows\GeneratedInternalTypeHelper.g.cs
+C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\obj\Debug\net8.0-windows\RiskCheckerGUI_MarkupCompile.cache
+C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\obj\Debug\net8.0-windows\RiskCheckerGUI_MarkupCompile.lref

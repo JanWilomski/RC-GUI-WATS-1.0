@@ -1,7 +1,7 @@
-﻿<Application x:Class="RC_GUI_WATS.App"
+﻿<Application x:Class="RiskCheckerGUI.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:RC_GUI_WATS"
+             xmlns:local="clr-namespace:RiskCheckerGUI"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
          

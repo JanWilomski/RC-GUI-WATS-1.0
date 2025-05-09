@@ -9,7 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 
-namespace RC_GUI_WATS;
+namespace RiskCheckerGUI;
 
 /// <summary>
 /// Interaction logic for MainWindow.xaml

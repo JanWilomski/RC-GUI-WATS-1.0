@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RC GUI WATS\\RC GUI WATS.csproj": {}
+    "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RiskCheckerGUI\\RiskCheckerGUI.csproj": {}
   },
   "projects": {
-    "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RC GUI WATS\\RC GUI WATS.csproj": {
+    "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RiskCheckerGUI\\RiskCheckerGUI.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RC GUI WATS\\RC GUI WATS.csproj",
-        "projectName": "RC GUI WATS",
-        "projectPath": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RC GUI WATS\\RC GUI WATS.csproj",
+        "projectUniqueName": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RiskCheckerGUI\\RiskCheckerGUI.csproj",
+        "projectName": "RiskCheckerGUI",
+        "projectPath": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RiskCheckerGUI\\RiskCheckerGUI.csproj",
         "packagesPath": "C:\\Users\\janwil\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RC GUI WATS\\obj\\",
+        "outputPath": "C:\\Users\\janwil\\Documents\\RC GUI WATS 1.0\\RiskCheckerGUI\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\janwil\\AppData\\Roaming\\NuGet\\NuGet.Config",
