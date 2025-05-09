@@ -71,9 +71,10 @@
                 
                 <TextBlock Grid.Row="0" Text=" " Margin="10,5"/>
                 
-                <TextBlock Grid.Row="1" Text="{Binding CapitalUsage.OpenCapital, StringFormat=N2}" Margin="10,2"/>
-                <TextBlock Grid.Row="2" Text="{Binding CapitalUsage.AccruedCapital, StringFormat=N2}" Margin="10,2"/>
-                <TextBlock Grid.Row="3" Text="{Binding CapitalUsage.TotalCapital, StringFormat=N2}" Margin="10,2"/>
+                <!-- Przykład dla bindowań kapitału -->
+                <TextBlock Grid.Row="1" Text="{Binding CapitalUsage.OpenCapital, StringFormat=N2, FallbackValue=0.00, TargetNullValue=0.00}" Margin="10,2"/>
+                <TextBlock Grid.Row="2" Text="{Binding CapitalUsage.AccruedCapital, StringFormat=N2, FallbackValue=0.00, TargetNullValue=0.00}" Margin="10,2"/>
+                <TextBlock Grid.Row="3" Text="{Binding CapitalUsage.TotalCapital, StringFormat=N2, FallbackValue=0.00, TargetNullValue=0.00}" Margin="10,2"/>
                 
                 <TextBlock Grid.Row="4" Text=" " Margin="10,5"/>
                 

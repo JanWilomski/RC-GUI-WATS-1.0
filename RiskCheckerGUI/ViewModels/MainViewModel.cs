@@ -60,7 +60,7 @@ namespace RiskCheckerGUI.ViewModels
             _tcpService = new TcpService(Host, TcpPort);
             _udpService = new UdpService(MulticastGroup, UdpPort);
 
-            // Create child view models
+            // Create child view models, ale nie inicjalizuj połączenia
             MessagesViewModel = new MessagesViewModel(_tcpService, _udpService);
             SettingsViewModel = new SettingsViewModel(_tcpService);
             FiltersViewModel = new FiltersViewModel();

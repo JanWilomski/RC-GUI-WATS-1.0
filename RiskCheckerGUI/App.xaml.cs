@@ -1,4 +1,6 @@
-﻿using System.Windows;
+﻿using System;
+using System.Windows;
+using System.Windows.Threading;
 using RiskCheckerGUI.ViewModels;
 
 namespace RiskCheckerGUI
@@ -9,24 +11,47 @@ namespace RiskCheckerGUI
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            base.OnStartup(e);
+            // Dodaj globalnego handlera wyjątków
+            Current.DispatcherUnhandledException += Current_DispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
 
-            // Create and assign the main view model
-            _mainViewModel = new MainViewModel();
-            
-            // Create main window
-            var mainWindow = new Views.MainWindow
+            try
             {
-                DataContext = _mainViewModel
-            };
-            
-            mainWindow.Show();
+                base.OnStartup(e);
+
+                // Create and assign the main view model
+                _mainViewModel = new MainViewModel();
+                
+                // Create main window
+                var mainWindow = new Views.MainWindow
+                {
+                    DataContext = _mainViewModel
+                };
+                
+                mainWindow.Show();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Błąd podczas inicjalizacji aplikacji: {ex.Message}\n\n{ex.StackTrace}", "Błąd krytyczny", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void Current_DispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            MessageBox.Show($"Nieobsługiwany wyjątek: {e.Exception.Message}\n\n{e.Exception.StackTrace}", "Błąd", MessageBoxButton.OK, MessageBoxImage.Error);
+            e.Handled = true; // Oznacz wyjątek jako obsłużony
+        }
+
+        private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            var ex = e.ExceptionObject as Exception;
+            MessageBox.Show($"Krytyczny nieobsługiwany wyjątek: {ex?.Message}\n\n{ex?.StackTrace}", "Błąd krytyczny", MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
             // Clean up resources
-            _mainViewModel.Cleanup();
+            _mainViewModel?.Cleanup();
             
             base.OnExit(e);
         }
