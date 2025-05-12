@@ -46,12 +46,16 @@
                     <Button Command="{Binding DisconnectCommand}" Content="Disconnect" Width="80"
                             IsEnabled="{Binding IsConnected}"/>
                 </StackPanel>
+                <Button Content="Test Connection" Width="100" Margin="5,0" Command="{Binding TestConnectionCommand}"/>
+
                 
                 <!-- Usunięte odniesienie do ConnectionStatusConverter -->
                 <TextBlock Grid.Column="9" Grid.ColumnSpan="2" Text="{Binding StatusMessage}" 
                            VerticalAlignment="Center" Margin="10,0,0,0"/>
             </Grid>
         </Border>
+
+        <Button Content="Refresh Data" Width="100" Margin="5,0" Command="{Binding RefreshDataCommand}"/>
         
         <!-- Zakładki aplikacji -->
         <TabControl Grid.Row="1">

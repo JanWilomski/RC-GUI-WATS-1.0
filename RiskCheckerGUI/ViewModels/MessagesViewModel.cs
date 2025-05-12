@@ -1,10 +1,14 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows.Data;
 using System.Windows.Threading;
+using System.IO;
+using System.Diagnostics;
 using RiskCheckerGUI.Models;
 using RiskCheckerGUI.Services;
+using System.Text;
 
 namespace RiskCheckerGUI.ViewModels
 {
@@ -100,9 +104,12 @@ namespace RiskCheckerGUI.ViewModels
             }
         }
 
+        // Computed properties for metrics
+        public string MessageUsageText => $"{CapitalUsage?.MessageUsagePercent ?? 0:F1}% of {CapitalUsage?.MessageLimit ?? 0}";
+        public string CapitalUsageText => $"{CapitalUsage?.CapitalUsagePercent ?? 0:F1}% of {CapitalUsage?.CapitalLimit ?? 0}";
+
         #endregion
 
-                // W konstruktorze
         public MessagesViewModel(TcpService tcpService, UdpService udpService)
         {
             _tcpService = tcpService ?? throw new ArgumentNullException(nameof(tcpService));
@@ -114,16 +121,23 @@ namespace RiskCheckerGUI.ViewModels
             _ccgMessages = new ObservableCollection<CcgMessage>();
             _orderBook = new ObservableCollection<OrderBookEntry>();
             _instrumentPositions = new ObservableCollection<InstrumentPosition>();
-            _capitalUsage = new CapitalUsage(); // Inicjalizacja, by uniknąć null
+            _capitalUsage = new CapitalUsage();
 
-            // Przykładowe wartości dla testów UI
-            _capitalUsage.OpenCapital = 0;
-            _capitalUsage.AccruedCapital = 0;
-            _capitalUsage.TotalCapital = 0;
+            // Domyślne wartości CapitalUsage
             _capitalUsage.MessageLimit = 115200;
             _capitalUsage.CapitalLimit = 100000;
 
-            // Reszta kodu...
+            // Synchronizacja kolekcji
+            BindingOperations.EnableCollectionSynchronization(_logs, _syncLock);
+            BindingOperations.EnableCollectionSynchronization(_ccgMessages, _syncLock);
+            BindingOperations.EnableCollectionSynchronization(_orderBook, _syncLock);
+            BindingOperations.EnableCollectionSynchronization(_instrumentPositions, _syncLock);
+
+            // Ustaw filtry dla kolekcji
+            SetupCollectionFilters();
+
+            // Subskrybuj zdarzenia z serwisów
+            SubscribeToEvents();
         }
 
         private void SetupCollectionFilters()
@@ -135,7 +149,7 @@ namespace RiskCheckerGUI.ViewModels
                 if (string.IsNullOrEmpty(MessageFilter)) return true;
                 var message = obj as CcgMessage;
                 return message != null && 
-                    (message.ClOrdID?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
+                       (message.ClOrdID?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
                         message.Symbol?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
                         message.Name?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
                         message.Header?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true);
@@ -200,6 +214,8 @@ namespace RiskCheckerGUI.ViewModels
         {
             _dispatcher.InvokeAsync(() =>
             {
+                Debug.WriteLine($"Position update received: {e.ISIN}, Net={e.Net}, Long={e.OpenLong}, Short={e.OpenShort}");
+                
                 // Update instrument positions
                 var existingPosition = InstrumentPositions.FirstOrDefault(p => p.ISIN == e.ISIN);
                 if (existingPosition != null)
@@ -227,12 +243,18 @@ namespace RiskCheckerGUI.ViewModels
         {
             _dispatcher.InvokeAsync(() =>
             {
+                Debug.WriteLine($"Capital update received: Open={e.OpenCapital}, Accrued={e.AccruedCapital}, Total={e.TotalCapital}");
+                
                 CapitalUsage.OpenCapital = e.OpenCapital;
                 CapitalUsage.AccruedCapital = e.AccruedCapital;
                 CapitalUsage.TotalCapital = e.TotalCapital;
                 
                 // Update used capital (this is an approximation, adjust as needed)
                 CapitalUsage.UsedCapital = e.TotalCapital;
+                
+                // Trigger updates for computed properties
+                OnPropertyChanged(nameof(MessageUsageText));
+                OnPropertyChanged(nameof(CapitalUsageText));
             });
         }
 
@@ -240,21 +262,30 @@ namespace RiskCheckerGUI.ViewModels
         {
             _dispatcher.InvokeAsync(() =>
             {
-                // Parse CCG message
-                var ccgMessage = ParseCcgMessage(messageBytes);
-                if (ccgMessage != null)
+                try
                 {
-                    // Add to messages list
-                    ccgMessage.Nr = CcgMessages.Count + 1; // Upewnij się, że numer jest unikalny
-                    CcgMessages.Insert(0, ccgMessage);
-                    if (CcgMessages.Count > 1000)
-                        CcgMessages.RemoveAt(CcgMessages.Count - 1);
+                    // Parse CCG message
+                    var ccgMessage = ParseCcgMessage(messageBytes);
+                    if (ccgMessage != null)
+                    {
+                        Debug.WriteLine($"CCG Message received: {ccgMessage.Header}, {ccgMessage.Name}, Symbol={ccgMessage.Symbol}");
+                        
+                        // Add to messages list
+                        CcgMessages.Insert(0, ccgMessage);
+                        if (CcgMessages.Count > 1000)
+                            CcgMessages.RemoveAt(CcgMessages.Count - 1);
 
-                    // Update message count for limits
-                    CapitalUsage.UsedMessages++;
+                        // Update message count for limits
+                        CapitalUsage.UsedMessages++;
+                        OnPropertyChanged(nameof(MessageUsageText));
 
-                    // Update order book
-                    UpdateOrderBook(ccgMessage);
+                        // Update order book
+                        UpdateOrderBook(ccgMessage);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error processing CCG message: {ex.Message}");
                 }
             });
         }
@@ -263,83 +294,288 @@ namespace RiskCheckerGUI.ViewModels
         {
             try
             {
-                // Konwertuj wiadomość do tekstu
-                string messageString = System.Text.Encoding.ASCII.GetString(messageBytes);
-                
-                // Najprostsze podejście - podziel wiadomość po określonym separatorze
-                // Zakładając format podobny do FIX (tag=value|tag=value)
-                // W rzeczywistości format może być inny, dostosuj do formatu twoich wiadomości
-                
-                // Przykładowy kod dla formatu tagowanego z separatorami
-                // Załóżmy, że wiadomość CCG ma format: 35=D|34=123|52=20250512-14:30:00|...
-                var parts = messageString.Split('|');
-                
-                var message = new CcgMessage
+                // Użyj MemoryStream dla wygodniejszego parsowania
+                using (var ms = new MemoryStream(messageBytes))
+                using (var reader = new BinaryReader(ms, Encoding.ASCII))
                 {
-                    Nr = _ccgMessages.Count + 1,  // Przydziel numer kolejny
-                    DateReceived = DateTime.Now,
-                    RawData = messageBytes
-                };
-                
-                foreach (var part in parts)
-                {
-                    var tagValue = part.Split('=');
-                    if (tagValue.Length != 2) continue;
+                    string messageStr = Encoding.ASCII.GetString(messageBytes);
+                    Debug.WriteLine($"Parsing CCG message: {messageStr}");
                     
-                    var tag = tagValue[0];
-                    var value = tagValue[1];
-                    
-                    switch (tag)
+                    // Stwórz podstawową wiadomość CCG
+                    var ccgMessage = new CcgMessage
                     {
-                        case "35": // MsgType
-                            message.Header = value;
-                            // Mapowanie typu wiadomości na nazwę
-                            message.Name = MapMessageTypeToName(value);
-                            break;
-                        case "34": // MsgSeqNum
-                            if (int.TryParse(value, out int seqNum))
-                                message.MsgSeqNum = seqNum;
-                            break;
-                        case "52": // TransactTime
-                            message.TransactTime = value;
-                            break;
-                        case "44": // Price 
-                            if (decimal.TryParse(value, out decimal price))
-                                message.Price = price;
-                            break;
-                        case "54": // Side
-                            message.Side = MapSideCodeToName(value);
-                            break;
-                        case "55": // Symbol
-                            message.Symbol = value;
-                            break;
-                        case "11": // ClOrdID
-                            message.ClOrdID = value;
-                            break;
-                        // Dodaj więcej tagów według potrzeb
+                        Nr = CcgMessages.Count + 1,
+                        DateReceived = DateTime.Now,
+                        RawData = messageBytes
+                    };
+                    
+                    // Próba parsowania jako formatu FIX-like
+                    // Format FIX: 8=FIX.4.4|9=100|35=D|34=123|...
+                    if (messageStr.Contains("8=FIX"))
+                    {
+                        // Split na poszczególne tagi
+                        var tags = messageStr.Split('|');
+                        foreach (var tag in tags)
+                        {
+                            var parts = tag.Split('=');
+                            if (parts.Length != 2) continue;
+                            
+                            var tagId = parts[0];
+                            var value = parts[1];
+                            
+                            switch (tagId)
+                            {
+                                case "35": // MsgType
+                                    ccgMessage.Header = value;
+                                    ccgMessage.Name = MapMessageTypeToName(value);
+                                    break;
+                                case "34": // MsgSeqNum
+                                    if (int.TryParse(value, out int seqNum))
+                                        ccgMessage.MsgSeqNum = seqNum;
+                                    break;
+                                case "52": // TransactTime
+                                    ccgMessage.TransactTime = value;
+                                    break;
+                                case "44": // Price 
+                                    if (decimal.TryParse(value, out decimal price))
+                                        ccgMessage.Price = price;
+                                    break;
+                                case "54": // Side
+                                    ccgMessage.Side = MapSideCodeToName(value);
+                                    break;
+                                case "55": // Symbol
+                                    ccgMessage.Symbol = value;
+                                    break;
+                                case "11": // ClOrdID
+                                    ccgMessage.ClOrdID = value;
+                                    break;
+                            }
+                        }
                     }
+                    else
+                    {
+                        // Próba podstawowego parsowania tekstu
+                        ccgMessage.Header = "UNKNOWN";
+                        ccgMessage.Name = "Raw CCG Message";
+                        ccgMessage.ClOrdID = "N/A";
+                        
+                        // Szukaj typowych wzorców w treści wiadomości
+                        if (messageStr.Contains("BUY") || messageStr.Contains("SELL"))
+                        {
+                            if (messageStr.Contains("BUY"))
+                                ccgMessage.Side = "Buy";
+                            else if (messageStr.Contains("SELL")) 
+                                ccgMessage.Side = "Sell";
+                            
+                            // Szukaj symbolu (zazwyczaj 3-6 znaków, litery)
+                            var symbolPattern = @"\b[A-Z]{2,6}\b";
+                            var symbolMatch = Regex.Match(messageStr, symbolPattern);
+                            if (symbolMatch.Success)
+                            {
+                                ccgMessage.Symbol = symbolMatch.Value;
+                            }
+                            
+                            // Szukaj ceny (liczba z kropką dziesiętną)
+                            var pricePattern = @"\d+\.\d+";
+                            var priceMatch = Regex.Match(messageStr, pricePattern);
+                            if (priceMatch.Success && decimal.TryParse(priceMatch.Value, out decimal price))
+                            {
+                                ccgMessage.Price = price;
+                            }
+                        }
+                    }
+                    
+                    return ccgMessage;
                 }
-                
-                return message;
             }
             catch (Exception ex)
             {
-                // Log błędu
-                Console.WriteLine($"Error parsing CCG message: {ex.Message}");
-                return null;
+                Debug.WriteLine($"Error parsing CCG message: {ex.Message}");
+                
+                // Zwróć podstawową wiadomość w przypadku błędu
+                return new CcgMessage
+                {
+                    Nr = CcgMessages.Count + 1,
+                    Header = "ERROR",
+                    Name = "Parse Error",
+                    DateReceived = DateTime.Now,
+                    RawData = messageBytes
+                };
             }
         }
 
+        private void UpdateOrderBook(CcgMessage message)
+        {
+            // Update order book based on CCG message content
+            try
+            {
+                // Przykładowe logowanie
+                Debug.WriteLine($"Updating order book with message: Header={message.Header}, Symbol={message.Symbol}, ClOrdID={message.ClOrdID}");
+                
+                // Example: New Order, Modify, Cancel logic
+                if (message.Header == "D") // New Order - używamy Header
+                {
+                    var orderEntry = new OrderBookEntry
+                    {
+                        OrderID = message.ClOrdID ?? $"ORD-{DateTime.Now.Ticks}",
+                        TransactTime = message.TransactTime ?? DateTime.Now.ToString("HH:mm:ss.fff"),
+                        Side = message.Side ?? "Unknown",
+                        Ticker = message.Symbol ?? "Unknown",
+                        Price = message.Price,
+                        // Other fields would be extracted from the message
+                        OrderQty = 100, // Placeholder
+                        CumQty = 0,
+                        LeavesQty = 100, // Placeholder
+                        MarketID = "MARKET",
+                        Account = "ACC",
+                        LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
+                        OrigOrderID = message.ClOrdID ?? $"ORD-{DateTime.Now.Ticks}",
+                        Text = "",
+                        IsActive = true
+                    };
+                    
+                    OrderBook.Insert(0, orderEntry);
+                    
+                    // Update instrument positions if needed
+                    UpdateInstrumentPositionFromOrder(orderEntry);
+                }
+                else if (message.Header == "G") // Order Cancel/Replace
+                {
+                    // Find the original order
+                    var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID);
+                    if (originalOrder != null)
+                    {
+                        // Mark original as inactive
+                        originalOrder.IsActive = false;
+                        
+                        // Create new modified order
+                        var modifiedOrder = new OrderBookEntry
+                        {
+                            OrderID = $"{message.ClOrdID}-M", // Modified order suffix
+                            TransactTime = message.TransactTime ?? DateTime.Now.ToString("HH:mm:ss.fff"),
+                            Side = message.Side ?? originalOrder.Side,
+                            Ticker = message.Symbol ?? originalOrder.Ticker,
+                            Price = message.Price > 0 ? message.Price : originalOrder.Price,
+                            // Other fields
+                            OrderQty = originalOrder.OrderQty, // Placeholder
+                            CumQty = originalOrder.CumQty,
+                            LeavesQty = originalOrder.OrderQty - originalOrder.CumQty, // Placeholder
+                            MarketID = originalOrder.MarketID,
+                            Account = originalOrder.Account,
+                            LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
+                            OrigOrderID = originalOrder.OrderID,
+                            Text = "Modified",
+                            IsActive = true
+                        };
+                        
+                        OrderBook.Insert(0, modifiedOrder);
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"Could not find original order with ID: {message.ClOrdID}");
+                    }
+                }
+                else if (message.Header == "F") // Order Cancel
+                {
+                    // Find the original order
+                    var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID);
+                    if (originalOrder != null)
+                    {
+                        // Mark as inactive
+                        originalOrder.IsActive = false;
+                        
+                        // Create cancel entry
+                        var cancelOrder = new OrderBookEntry
+                        {
+                            OrderID = originalOrder.OrderID,
+                            TransactTime = message.TransactTime ?? DateTime.Now.ToString("HH:mm:ss.fff"),
+                            Side = originalOrder.Side,
+                            Ticker = originalOrder.Ticker,
+                            Price = originalOrder.Price,
+                            OrderQty = originalOrder.OrderQty,
+                            CumQty = originalOrder.CumQty,
+                            LeavesQty = 0, // Cancelled
+                            MarketID = originalOrder.MarketID,
+                            Account = originalOrder.Account,
+                            LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
+                            OrigOrderID = originalOrder.OrderID,
+                            Text = "Cancelled",
+                            IsActive = false
+                        };
+                        
+                        OrderBook.Insert(0, cancelOrder);
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"Could not find original order with ID: {message.ClOrdID}");
+                    }
+                }
+                
+                // Maintain reasonable collection size
+                if (OrderBook.Count > 1000)
+                    OrderBook.RemoveAt(OrderBook.Count - 1);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error updating order book: {ex.Message}");
+            }
+        }
+
+        private void UpdateInstrumentPositionFromOrder(OrderBookEntry order)
+        {
+            try
+            {
+                // This is a simplified example
+                // You'll need to implement actual logic based on your business rules
+                
+                var instrument = InstrumentPositions.FirstOrDefault(i => i.TickerName == order.Ticker);
+                if (instrument == null)
+                {
+                    // Create new instrument position
+                    instrument = new InstrumentPosition
+                    {
+                        ISIN = "PLACEHOLDER", // You'd need to get the actual ISIN from somewhere
+                        TickerName = order.Ticker,
+                        Net = 0,
+                        OpenLong = 0,
+                        OpenShort = 0
+                    };
+                    
+                    InstrumentPositions.Add(instrument);
+                }
+                
+                // Update position based on order
+                // This is simplified logic - adjust based on your actual requirements
+                if (order.Side == "Buy")
+                {
+                    instrument.OpenLong += order.OrderQty;
+                    instrument.Net = instrument.OpenLong - instrument.OpenShort;
+                }
+                else if (order.Side == "Sell")
+                {
+                    instrument.OpenShort += order.OrderQty;
+                    instrument.Net = instrument.OpenLong - instrument.OpenShort;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error updating instrument position: {ex.Message}");
+            }
+        }
+
+        // Helper methods for CCG messages
         private string MapMessageTypeToName(string msgType)
         {
             switch (msgType)
             {
                 case "D": return "New Order";
-                case "G": return "Order Cancel/Replace";
-                case "F": return "Order Cancel";
+                case "F": return "Cancel Order";
+                case "G": return "Modify Order";
                 case "8": return "Execution Report";
-                case "9": return "Order Cancel Reject";
-                // Dodaj więcej typów według potrzeb
+                case "9": return "Cancel Reject";
+                case "0": return "Heartbeat";
+                case "A": return "Logon";
+                case "5": return "Logout";
                 default: return msgType;
             }
         }
@@ -354,148 +590,137 @@ namespace RiskCheckerGUI.ViewModels
                 case "4": return "Sell plus";
                 case "5": return "Sell short";
                 case "6": return "Sell short exempt";
-                case "7": return "Undisclosed";
-                case "8": return "Cross";
-                case "9": return "Cross short";
-                // Dodaj więcej kodów stron według potrzeb
                 default: return sideCode;
             }
         }
 
-        private void UpdateOrderBook(CcgMessage message)
+        // Demo data methods
+        public void LoadSampleData()
         {
-            // Update order book based on CCG message content
-            // This is a simplified example - you'll need to implement actual logic
-            // based on your protocol specification and business rules
+            // Clear existing data
+            ClearData();
             
-            // Example: New Order, Modify, Cancel logic
-            if (message.Header == "D") // New Order - używamy Header zamiast Type
-            {
-                var orderEntry = new OrderBookEntry
-                {
-                    OrderID = message.ClOrdID, // używamy ClOrdID zamiast OrderID
-                    TransactTime = message.TransactTime,
-                    Side = message.Side,
-                    Ticker = message.Symbol,
-                    Price = message.Price,
-                    // Other fields would be extracted from the message
-                    // This is just an example
-                    OrderQty = 100, // Placeholder
-                    CumQty = 0,
-                    LeavesQty = 100, // Placeholder
-                    MarketID = "MARKET",
-                    Account = "ACC",
-                    LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
-                    OrigOrderID = message.ClOrdID, // używamy ClOrdID zamiast OrderID
-                    Text = ""
-                };
-                
-                OrderBook.Insert(0, orderEntry);
-                
-                // Update instrument positions if needed
-                UpdateInstrumentPositionFromOrder(orderEntry);
-            }
-            else if (message.Header == "G") // Order Cancel/Replace - używamy Header zamiast Type
-            {
-                // Find the original order
-                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID); // używamy ClOrdID zamiast OrderID
-                if (originalOrder != null)
-                {
-                    // Mark original as inactive
-                    originalOrder.IsActive = false;
-                    
-                    // Create new modified order
-                    var modifiedOrder = new OrderBookEntry
-                    {
-                        OrderID = message.ClOrdID + "M", // używamy ClOrdID zamiast OrderID
-                        TransactTime = message.TransactTime,
-                        Side = message.Side,
-                        Ticker = message.Symbol,
-                        Price = message.Price,
-                        // Other fields
-                        OrderQty = 100, // Placeholder
-                        CumQty = originalOrder.CumQty,
-                        LeavesQty = 100 - originalOrder.CumQty, // Placeholder
-                        MarketID = originalOrder.MarketID,
-                        Account = originalOrder.Account,
-                        LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
-                        OrigOrderID = originalOrder.OrderID,
-                        Text = "Modified"
-                    };
-                    
-                    OrderBook.Insert(0, modifiedOrder);
-                }
-            }
-            else if (message.Header == "F") // Order Cancel - używamy Header zamiast Type
-            {
-                // Find the original order
-                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID); // używamy ClOrdID zamiast OrderID
-                if (originalOrder != null)
-                {
-                    // Mark as inactive
-                    originalOrder.IsActive = false;
-                    
-                    // Create cancel entry
-                    var cancelOrder = new OrderBookEntry
-                    {
-                        OrderID = originalOrder.OrderID,
-                        TransactTime = message.TransactTime,
-                        Side = originalOrder.Side,
-                        Ticker = originalOrder.Ticker,
-                        Price = originalOrder.Price,
-                        OrderQty = originalOrder.OrderQty,
-                        CumQty = originalOrder.CumQty,
-                        LeavesQty = 0, // Cancelled
-                        MarketID = originalOrder.MarketID,
-                        Account = originalOrder.Account,
-                        LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
-                        OrigOrderID = originalOrder.OrderID,
-                        Text = "Cancelled",
-                        IsActive = false
-                    };
-                    
-                    OrderBook.Insert(0, cancelOrder);
-                }
-            }
+            // Add sample data
+            AddSampleData();
+        }
+        
+        public void ClearData()
+        {
+            CcgMessages.Clear();
+            Logs.Clear();
+            OrderBook.Clear();
+            InstrumentPositions.Clear();
             
-            // Maintain reasonable collection size
-            if (OrderBook.Count > 1000)
-                OrderBook.RemoveAt(OrderBook.Count - 1);
+            // Reset capital usage
+            CapitalUsage.OpenCapital = 0;
+            CapitalUsage.AccruedCapital = 0;
+            CapitalUsage.TotalCapital = 0;
+            CapitalUsage.UsedMessages = 0;
+            CapitalUsage.UsedCapital = 0;
+            
+            OnPropertyChanged(nameof(MessageUsageText));
+            OnPropertyChanged(nameof(CapitalUsageText));
         }
 
-        private void UpdateInstrumentPositionFromOrder(OrderBookEntry order)
+        private void AddSampleData()
         {
-            // This is a simplified example
-            // You'll need to implement actual logic based on your business rules
+            // Przykładowe dane dla kapitału
+            CapitalUsage.OpenCapital = 5000;
+            CapitalUsage.AccruedCapital = 2468.89;
+            CapitalUsage.TotalCapital = CapitalUsage.OpenCapital + CapitalUsage.AccruedCapital;
+            CapitalUsage.UsedMessages = 5000;
+            CapitalUsage.MessageLimit = 115200;
+            CapitalUsage.UsedCapital = 25000;
+            CapitalUsage.CapitalLimit = 100000;
             
-            var instrument = InstrumentPositions.FirstOrDefault(i => i.TickerName == order.Ticker);
-            if (instrument == null)
+            OnPropertyChanged(nameof(MessageUsageText));
+            OnPropertyChanged(nameof(CapitalUsageText));
+            
+            // Przykładowe instrumenty
+            InstrumentPositions.Add(new InstrumentPosition
             {
-                // Create new instrument position
-                instrument = new InstrumentPosition
+                ISIN = "PLPKO0000016",
+                TickerName = "PKO",
+                Net = 100,
+                OpenLong = 100,
+                OpenShort = 0
+            });
+            
+            InstrumentPositions.Add(new InstrumentPosition
+            {
+                ISIN = "PLKGHM000017",
+                TickerName = "KGH",
+                Net = -50,
+                OpenLong = 0,
+                OpenShort = 50
+            });
+            
+            // Przykładowe wiadomości CCG
+            AddSampleCcgMessages();
+        }
+
+        private void AddSampleCcgMessages()
+        {
+            var random = new Random();
+            
+            // Kilka przykładowych typów wiadomości
+            var msgTypes = new[] { "D", "G", "F", "8", "9" };
+            var sides = new[] { "1", "2" };
+            var symbols = new[] { "PKO", "PGE", "KGH", "PZU", "OPL" };
+            
+            for (int i = 1; i <= 10; i++)
+            {
+                var msgType = msgTypes[random.Next(msgTypes.Length)];
+                var side = sides[random.Next(sides.Length)];
+                var symbol = symbols[random.Next(symbols.Length)];
+                
+                var ccgMessage = new CcgMessage
                 {
-                    ISIN = "PLACEHOLDER", // You'd need to get the actual ISIN from somewhere
-                    TickerName = order.Ticker,
-                    Net = 0,
-                    OpenLong = 0,
-                    OpenShort = 0
+                    Nr = i,
+                    Header = msgType,
+                    Name = MapMessageTypeToName(msgType),
+                    MsgSeqNum = i + 1000,
+                    DateReceived = DateTime.Now.AddSeconds(-random.Next(60)),
+                    TransactTime = DateTime.Now.AddSeconds(-random.Next(120)).ToString("yyyyMMdd-HH:mm:ss.fff"),
+                    Price = Math.Round(10 + (decimal)random.NextDouble() * 90, 2),
+                    Side = MapSideCodeToName(side),
+                    Symbol = symbol,
+                    ClOrdID = $"ORD{100000 + i}"
                 };
                 
-                InstrumentPositions.Add(instrument);
+                CcgMessages.Add(ccgMessage);
+                
+                // Dodaj odpowiednie wpisy do OrderBook
+                if (msgType == "D") // New Order
+                {
+                    var orderEntry = new OrderBookEntry
+                    {
+                        OrderID = ccgMessage.ClOrdID,
+                        TransactTime = ccgMessage.TransactTime,
+                        Side = ccgMessage.Side,
+                        Ticker = ccgMessage.Symbol,
+                        Price = ccgMessage.Price,
+                        OrderQty = 100 + random.Next(900),
+                        CumQty = 0,
+                        LeavesQty = 100 + random.Next(900),
+                        MarketID = "GPW",
+                        Account = $"ACC{random.Next(10)}",
+                        LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
+                        OrigOrderID = ccgMessage.ClOrdID,
+                        Text = "",
+                        IsActive = true
+                    };
+                    
+                    OrderBook.Add(orderEntry);
+                }
             }
             
-            // Update position based on order
-            // This is simplified logic - adjust based on your actual requirements
-            if (order.Side == "BUY")
-            {
-                instrument.OpenLong += order.OrderQty;
-                instrument.Net = instrument.OpenLong - instrument.OpenShort;
-            }
-            else if (order.Side == "SELL")
-            {
-                instrument.OpenShort += order.OrderQty;
-                instrument.Net = instrument.OpenLong - instrument.OpenShort;
-            }
+            // Dodaj przykładowe logi
+            Logs.Add(new LogMessage { Type = LogType.Info, Message = "Application started", Timestamp = DateTime.Now.AddMinutes(-5) });
+            Logs.Add(new LogMessage { Type = LogType.Debug, Message = "Initializing systems", Timestamp = DateTime.Now.AddMinutes(-4) });
+            Logs.Add(new LogMessage { Type = LogType.Info, Message = "Systems initialized", Timestamp = DateTime.Now.AddMinutes(-3) });
+            Logs.Add(new LogMessage { Type = LogType.Warning, Message = "Network latency detected", Timestamp = DateTime.Now.AddMinutes(-2) });
+            Logs.Add(new LogMessage { Type = LogType.Info, Message = "Ready to process orders", Timestamp = DateTime.Now.AddMinutes(-1) });
         }
 
         public void Cleanup()

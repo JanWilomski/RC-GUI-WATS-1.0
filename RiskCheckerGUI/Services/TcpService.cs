@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using RiskCheckerGUI.Models;
 
 namespace RiskCheckerGUI.Services
@@ -12,16 +14,42 @@ namespace RiskCheckerGUI.Services
         private NetworkStream _stream;
         private string _host;
         private int _port;
+        private bool _isConnected;
+        private CancellationTokenSource _cts;
 
         public event EventHandler<LogMessage> LogReceived;
         public event EventHandler<Position> PositionReceived;
         public event EventHandler<Capital> CapitalReceived;
         public event EventHandler<byte[]> IOBytesReceived;
         public event EventHandler<string> RewindCompleted;
+        public event EventHandler<ConnectionEventArgs> ConnectionStatusChanged;
+
+        public class ConnectionEventArgs : EventArgs
+        {
+            public bool IsConnected { get; set; }
+            public string Message { get; set; }
+        }
 
         public TcpService(string host, int port)
         {
             _host = host;
+            _port = port;
+            _isConnected = false;
+            _cts = new CancellationTokenSource();
+        }
+
+        public string CurrentHost => _host;
+        public int CurrentPort => _port;
+        public bool IsConnected => _isConnected;
+
+        public void UpdateConnection(string host, int port)
+        {
+            if (_client != null && _client.Connected)
+            {
+                Disconnect();
+            }
+            
+            _host = host ?? throw new ArgumentNullException(nameof(host));
             _port = port;
         }
 
@@ -29,40 +57,237 @@ namespace RiskCheckerGUI.Services
         {
             try
             {
-                _client = new TcpClient();
-                
-                // Ustaw timeout dla połączenia
-                var connectTask = _client.ConnectAsync(_host, _port);
-                var timeoutTask = Task.Delay(5000); // 5 sekund timeout
-                
-                if (await Task.WhenAny(connectTask, timeoutTask) == timeoutTask)
+                if (_isConnected)
                 {
-                    throw new TimeoutException("Connection timed out");
+                    Disconnect();
                 }
-                
-                _stream = _client.GetStream();
 
-                // Start listening for messages
-                _ = Task.Run(ReceiveMessagesAsync);
+                _cts = new CancellationTokenSource();
+                Debug.WriteLine($"Próba połączenia z serwerem {_host}:{_port}...");
                 
-                // Notyfikuj o połączeniu
-                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs { IsConnected = true, Message = "Connected to server" });
+                _client = new TcpClient();
+                await _client.ConnectAsync(_host, _port);
+                _stream = _client.GetStream();
+                _isConnected = true;
+                
+                Debug.WriteLine($"Połączono z serwerem {_host}:{_port}");
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs 
+                { 
+                    IsConnected = true, 
+                    Message = $"Connected to {_host}:{_port}" 
+                });
+
+                // Start reading messages
+                _ = Task.Run(() => ReadMessagesAsync(_cts.Token), _cts.Token);
             }
             catch (Exception ex)
             {
-                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs { IsConnected = false, Message = $"Error connecting: {ex.Message}" });
-                throw; // Przepuść wyjątek, aby MainViewModel mógł go obsłużyć
+                Debug.WriteLine($"Exception w ConnectAsync: {ex.Message}\nStackTrace: {ex.StackTrace}");
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs 
+                { 
+                    IsConnected = false, 
+                    Message = $"Connection error: {ex.Message}" 
+                });
+                throw;
             }
         }
 
-        // Dodaj zdarzenie do informowania o zmianach statusu połączenia
-        public event EventHandler<ConnectionEventArgs> ConnectionStatusChanged;
-
-        // Klasa do przekazywania informacji o statusie połączenia
-        public class ConnectionEventArgs : EventArgs
+        private async Task ReadMessagesAsync(CancellationToken token)
         {
-            public bool IsConnected { get; set; }
-            public string Message { get; set; }
+            try
+            {
+                using (var reader = new BinaryReader(_stream, Encoding.ASCII, leaveOpen: true))
+                {
+                    while (!token.IsCancellationRequested && _client.Connected)
+                    {
+                        try
+                        {
+                            // Read header (16 bytes)
+                            byte[] sessionBytes = reader.ReadBytes(10);
+                            if (sessionBytes.Length < 10) break;
+                            
+                            string session = Encoding.ASCII.GetString(sessionBytes).TrimEnd('\0');
+                            uint sequence = reader.ReadUInt32();
+                            ushort blockCount = reader.ReadUInt16();
+
+                            Debug.WriteLine($"Received message: Session={session}, Seq={sequence}, BlockCount={blockCount}");
+
+                            if (blockCount == 0)
+                            {
+                                Debug.WriteLine($"Heartbeat: Session={session}, Seq={sequence}");
+                                continue;
+                            }
+
+                            for (int i = 0; i < blockCount; i++)
+                            {
+                                ushort blockLength = reader.ReadUInt16();
+                                byte[] payload = reader.ReadBytes(blockLength);
+                                if (payload.Length == 0) continue;
+                                
+                                char messageType = (char)payload[0];
+                                Debug.WriteLine($"Block {i}: Type={messageType}, Length={blockLength}");
+                                
+                                switch (messageType)
+                                {
+                                    case 'P': 
+                                        ProcessPositionMessage(payload); 
+                                        break;
+                                    case 'C': 
+                                        ProcessCapitalMessage(payload); 
+                                        break;
+                                    case 'D':
+                                    case 'I':
+                                    case 'W':
+                                    case 'E': 
+                                        ProcessLogMessage(payload); 
+                                        break;
+                                    case 'B': 
+                                        ProcessIOBytesMessage(payload); 
+                                        break;
+                                    case 'r':
+                                        OnRewindCompleted();
+                                        break;
+                                    default: 
+                                        Debug.WriteLine($"Unknown message type: {messageType}"); 
+                                        break;
+                                }
+                            }
+                        }
+                        catch (EndOfStreamException)
+                        {
+                            Debug.WriteLine("End of stream reached");
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error during message reading: {ex.Message}");
+                            if (!_client.Connected) break;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Fatal error in read loop: {ex.Message}\nStackTrace: {ex.StackTrace}");
+            }
+            finally
+            {
+                _isConnected = false;
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs 
+                { 
+                    IsConnected = false, 
+                    Message = "Connection closed" 
+                });
+            }
+        }
+
+        private void ProcessPositionMessage(byte[] payload)
+        {
+            try
+            {
+                // Position message: 1 byte type + 12 bytes ISIN + 3 x 4-byte ints
+                string isin = Encoding.ASCII.GetString(payload, 1, 12).Trim('\0');
+                int net = BitConverter.ToInt32(payload, 13);
+                int openLong = BitConverter.ToInt32(payload, 17);
+                int openShort = BitConverter.ToInt32(payload, 21);
+                
+                Debug.WriteLine($"Position: ISIN={isin}, Net={net}, Long={openLong}, Short={openShort}");
+                
+                var position = new Position
+                {
+                    ISIN = isin,
+                    Net = net,
+                    OpenLong = openLong,
+                    OpenShort = openShort,
+                    Timestamp = DateTime.Now
+                };
+                
+                PositionReceived?.Invoke(this, position);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error processing position message: {ex.Message}");
+            }
+        }
+
+        private void ProcessCapitalMessage(byte[] payload)
+        {
+            try
+            {
+                // Capital message: 1 byte type + 3 doubles
+                double openCapital = BitConverter.ToDouble(payload, 1);
+                double accruedCapital = BitConverter.ToDouble(payload, 9);
+                double totalCapital = BitConverter.ToDouble(payload, 17);
+                
+                Debug.WriteLine($"Capital: Open={openCapital}, Accrued={accruedCapital}, Total={totalCapital}");
+                
+                var capital = new Capital
+                {
+                    OpenCapital = openCapital,
+                    AccruedCapital = accruedCapital,
+                    TotalCapital = totalCapital,
+                    Timestamp = DateTime.Now
+                };
+                
+                CapitalReceived?.Invoke(this, capital);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error processing capital message: {ex.Message}");
+            }
+        }
+
+        private void ProcessLogMessage(byte[] payload)
+        {
+            try
+            {
+                // Log message: 1 byte type + 2-byte length + message
+                char level = (char)payload[0];
+                ushort length = BitConverter.ToUInt16(payload, 1);
+                string message = Encoding.ASCII.GetString(payload, 3, length);
+                
+                Debug.WriteLine($"Log [{level}]: {message}");
+                
+                var logMessage = new LogMessage
+                {
+                    Type = (LogType)level,
+                    Message = message,
+                    Timestamp = DateTime.Now
+                };
+                
+                LogReceived?.Invoke(this, logMessage);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error processing log message: {ex.Message}");
+            }
+        }
+
+        private void ProcessIOBytesMessage(byte[] payload)
+        {
+            try
+            {
+                // I/O bytes message: 1 byte type + 2-byte length + message
+                ushort length = BitConverter.ToUInt16(payload, 1);
+                byte[] message = new byte[length];
+                Array.Copy(payload, 3, message, 0, length);
+                
+                // For debugging
+                string messageStr = Encoding.ASCII.GetString(message);
+                Debug.WriteLine($"IO: {messageStr}");
+                
+                IOBytesReceived?.Invoke(this, message);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error processing IO bytes message: {ex.Message}");
+            }
+        }
+
+        private void OnRewindCompleted()
+        {
+            Debug.WriteLine("Rewind completed");
+            RewindCompleted?.Invoke(this, "Rewind completed");
         }
 
         public async Task SendControlAsync(Control control)
@@ -99,163 +324,7 @@ namespace RiskCheckerGUI.Services
 
             var message = BuildRewindMessage(lastSeenSequence);
             await _stream.WriteAsync(message, 0, message.Length);
-        }
-
-        private async Task ReceiveMessagesAsync()
-        {
-            var buffer = new byte[4096];
-            while (_client.Connected)
-            {
-                try
-                {
-                    int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
-                    if (bytesRead == 0)
-                        break;
-
-                    ProcessMessage(buffer, bytesRead);
-                }
-                catch (Exception ex)
-                {
-                    // Handle exception (log, retry connection, etc.)
-                    Console.WriteLine($"Error receiving message: {ex.Message}");
-                    break;
-                }
-            }
-        }
-
-        private void ProcessMessage(byte[] buffer, int bytesRead)
-        {
-            // Implement message parsing based on the protocol specification
-            // This is a simplified example - you'll need to handle the full protocol
-            if (bytesRead < 16) // At least a header
-                return;
-
-            // Parse header
-            string session = Encoding.ASCII.GetString(buffer, 0, 10);
-            uint sequenceNumber = BitConverter.ToUInt32(buffer, 10);
-            ushort blockCount = BitConverter.ToUInt16(buffer, 14);
-
-            int offset = 16; // Start of blocks
-
-            for (int i = 0; i < blockCount && offset < bytesRead; i++)
-            {
-                // Parse block header
-                ushort length = BitConverter.ToUInt16(buffer, offset);
-                offset += 2;
-
-                // Make sure there's enough data
-                if (offset + 1 > bytesRead)
-                    break;
-
-                char messageType = (char)buffer[offset];
-                offset += 1;
-
-                switch (messageType)
-                {
-                    case 'D': // Debug log
-                    case 'I': // Info log
-                    case 'W': // Warning log
-                    case 'E': // Error log
-                        ProcessLogMessage(buffer, ref offset, messageType);
-                        break;
-                    case 'P': // Position
-                        ProcessPositionMessage(buffer, ref offset);
-                        break;
-                    case 'C': // Capital
-                        ProcessCapitalMessage(buffer, ref offset);
-                        break;
-                    case 'B': // I/O bytes
-                        ProcessIOBytesMessage(buffer, ref offset);
-                        break;
-                    case 'r': // Rewind complete
-                        OnRewindCompleted();
-                        break;
-                    // Handle other message types as needed
-                }
-
-                // Move to the next block
-                offset += length - 1; // -1 because we already incremented for the message type
-            }
-        }
-
-        private void ProcessLogMessage(byte[] buffer, ref int offset, char messageType)
-        {
-            ushort length = BitConverter.ToUInt16(buffer, offset);
-            offset += 2;
-
-            string message = Encoding.UTF8.GetString(buffer, offset, length);
-
-            LogReceived?.Invoke(this, new LogMessage
-            {
-                Type = (LogType)messageType,
-                Message = message
-            });
-        }
-
-        private void ProcessPositionMessage(byte[] buffer, ref int offset)
-        {
-            // Position message is 25 bytes total
-            if (offset + 24 > buffer.Length)
-                return;
-
-            string isin = Encoding.ASCII.GetString(buffer, offset, 12);
-            offset += 12;
-
-            int net = BitConverter.ToInt32(buffer, offset);
-            offset += 4;
-
-            int openLong = BitConverter.ToInt32(buffer, offset);
-            offset += 4;
-
-            int openShort = BitConverter.ToInt32(buffer, offset);
-            offset += 4;
-
-            PositionReceived?.Invoke(this, new Position
-            {
-                ISIN = isin.TrimEnd('\0'),
-                Net = net,
-                OpenLong = openLong,
-                OpenShort = openShort
-            });
-        }
-
-        private void ProcessCapitalMessage(byte[] buffer, ref int offset)
-        {
-            // Capital message is 25 bytes total
-            if (offset + 24 > buffer.Length)
-                return;
-
-            double openCapital = BitConverter.ToDouble(buffer, offset);
-            offset += 8;
-
-            double accruedCapital = BitConverter.ToDouble(buffer, offset);
-            offset += 8;
-
-            double totalCapital = BitConverter.ToDouble(buffer, offset);
-            offset += 8;
-
-            CapitalReceived?.Invoke(this, new Capital
-            {
-                OpenCapital = openCapital,
-                AccruedCapital = accruedCapital,
-                TotalCapital = totalCapital
-            });
-        }
-
-        private void ProcessIOBytesMessage(byte[] buffer, ref int offset)
-        {
-            ushort length = BitConverter.ToUInt16(buffer, offset);
-            offset += 2;
-
-            byte[] message = new byte[length];
-            Array.Copy(buffer, offset, message, 0, length);
-
-            IOBytesReceived?.Invoke(this, message);
-        }
-
-        private void OnRewindCompleted()
-        {
-            RewindCompleted?.Invoke(this, "Rewind completed");
+            Debug.WriteLine($"Sent rewind request with lastSeenSequence={lastSeenSequence}");
         }
 
         private byte[] BuildControlMessage(Control control)
@@ -348,25 +417,24 @@ namespace RiskCheckerGUI.Services
 
         public void Disconnect()
         {
-            _stream?.Close();
-            _client?.Close();
-        }
-
-        public void UpdateConnection(string host, int port)
-        {
-            if (_client != null && _client.Connected)
+            try
             {
-                Disconnect();
+                _cts.Cancel();
+                _stream?.Close();
+                _client?.Close();
+                _isConnected = false;
+                
+                Debug.WriteLine("Disconnected from server");
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs 
+                { 
+                    IsConnected = false, 
+                    Message = "Disconnected" 
+                });
             }
-            
-            _host = host ?? throw new ArgumentNullException(nameof(host));
-            _port = port;
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error during disconnect: {ex.Message}");
+            }
         }
-
-
-
-
     }
-
-
 }
