@@ -10,11 +10,11 @@ none
 false
 TRACE;DEBUG;NET;NET8_0;NETCOREAPP
 C:\Users\janwil\Documents\RC GUI WATS 1.0\RiskCheckerGUI\App.xaml
-2-832204000
+5-747147594
 
-262017127720
+32-313273377
 198-1509178875
-Views\MainWindow.xaml;Views\MessagesView.xaml;
+Views\FiltersView.xaml;Views\InstrumentsView.xaml;Views\MainWindow.xaml;Views\MessagesView.xaml;Views\SettingsView.xaml;
 
 False
 

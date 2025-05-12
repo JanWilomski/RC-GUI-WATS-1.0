@@ -78,29 +78,26 @@
                 
                 <TextBlock Grid.Row="4" Text=" " Margin="10,5"/>
                 
-                <Grid Grid.Row="5" Margin="10,2">
-                    <TextBlock Style="{StaticResource LimitStyle}" 
-                            Background="{Binding CapitalUsage.MessageUsagePercent, Converter={StaticResource PercentageToColorConverter}}">
-                        <TextBlock.Text>
-                            <MultiBinding StringFormat="{}{0:F1}% of {1}">
-                                <Binding Path="CapitalUsage.MessageUsagePercent" />
-                                <Binding Path="CapitalUsage.MessageLimit" />
-                            </MultiBinding>
-                        </TextBlock.Text>
-                    </TextBlock>
-                </Grid>
-                
-                <Grid Grid.Row="6" Margin="10,2">
-                    <TextBlock Style="{StaticResource LimitStyle}" 
-                            Background="{Binding CapitalUsage.CapitalUsagePercent, Converter={StaticResource PercentageToColorConverter}}">
-                        <TextBlock.Text>
-                            <MultiBinding StringFormat="{}{0:F1}% of {1}">
-                                <Binding Path="CapitalUsage.CapitalUsagePercent" />
-                                <Binding Path="CapitalUsage.CapitalLimit" />
-                            </MultiBinding>
-                        </TextBlock.Text>
-                    </TextBlock>
-                </Grid>
+                <TextBlock Style="{StaticResource LimitStyle}" 
+                        Background="{Binding CapitalUsage.MessageUsagePercent, Converter={StaticResource PercentageToColorConverter}, FallbackValue=Transparent}">
+                    <TextBlock.Text>
+                        <MultiBinding StringFormat="{}{0:F1}% of {1}">
+                            <Binding Path="CapitalUsage.MessageUsagePercent" FallbackValue="0.0"/>
+                            <Binding Path="CapitalUsage.MessageLimit" FallbackValue="0"/>
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
+
+                <!-- Dla CapitalUsagePercent -->
+                <TextBlock Style="{StaticResource LimitStyle}" 
+                        Background="{Binding CapitalUsage.CapitalUsagePercent, Converter={StaticResource PercentageToColorConverter}, FallbackValue=Transparent}">
+                    <TextBlock.Text>
+                        <MultiBinding StringFormat="{}{0:F1}% of {1}">
+                            <Binding Path="CapitalUsage.CapitalUsagePercent" FallbackValue="0.0"/>
+                            <Binding Path="CapitalUsage.CapitalLimit" FallbackValue="0"/>
+                        </MultiBinding>
+                    </TextBlock.Text>
+                </TextBlock>
             </Grid>
         </Grid>
         
@@ -136,6 +133,7 @@
         </Grid>
         
         <!-- 3. Sekcja CCG Messages -->
+        <!-- Sekcja CCG Messages -->
         <Grid Grid.Row="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -145,28 +143,29 @@
             <StackPanel Grid.Row="0" Orientation="Horizontal" Background="#F0F0F0">
                 <TextBlock Text="CCG Messages" FontWeight="Bold" Margin="5"/>
                 <TextBox Width="150" Margin="5" Text="{Binding MessageFilter, UpdateSourceTrigger=PropertyChanged}" 
-                         ToolTip="Filter messages"/>
+                        ToolTip="Filter messages"/>
                 <CheckBox Content="Auto scroll" IsChecked="True" Margin="5" VerticalAlignment="Center"/>
             </StackPanel>
             
             <DataGrid Grid.Row="1" ItemsSource="{Binding CcgMessages}" 
-                      AutoGenerateColumns="False" 
-                      IsReadOnly="True"
-                      CanUserResizeColumns="True"
-                      CanUserSortColumns="True"
-                      HorizontalGridLinesBrush="#E0E0E0"
-                      VerticalGridLinesBrush="#E0E0E0"
-                      AlternatingRowBackground="#F9F9F9">
+                    AutoGenerateColumns="False" 
+                    IsReadOnly="True"
+                    CanUserResizeColumns="True"
+                    CanUserSortColumns="True"
+                    HorizontalGridLinesBrush="#E0E0E0"
+                    VerticalGridLinesBrush="#E0E0E0"
+                    AlternatingRowBackground="#F9F9F9">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Header" Binding="{Binding Header}" Width="80"/>
-                    <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="50"/>
+                    <DataGridTextColumn Header="Nr" Binding="{Binding Nr}" Width="40"/>
+                    <DataGridTextColumn Header="Header" Binding="{Binding Header}" Width="60"/>
+                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120"/>
                     <DataGridTextColumn Header="MsgSeqNum" Binding="{Binding MsgSeqNum}" Width="80"/>
                     <DataGridTextColumn Header="Date received" Binding="{Binding DateReceived, StringFormat='yyyy-MM-dd HH:mm:ss.fff'}" Width="150"/>
                     <DataGridTextColumn Header="Transact time" Binding="{Binding TransactTime}" Width="120"/>
                     <DataGridTextColumn Header="Price" Binding="{Binding Price, StringFormat=N2}" Width="80"/>
-                    <DataGridTextColumn Header="Side Symbol" Binding="{Binding Side}" Width="80"/>
-                    <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="80"/>
-                    <DataGridTextColumn Header="OrderID" Binding="{Binding OrderID}" Width="150"/>
+                    <DataGridTextColumn Header="Side" Binding="{Binding Side}" Width="60"/>
+                    <DataGridTextColumn Header="Symbol" Binding="{Binding Symbol}" Width="60"/>
+                    <DataGridTextColumn Header="ClOrdID" Binding="{Binding ClOrdID}" Width="120"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>

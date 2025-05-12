@@ -27,12 +27,42 @@ namespace RiskCheckerGUI.Services
 
         public async Task ConnectAsync()
         {
-            _client = new TcpClient();
-            await _client.ConnectAsync(_host, _port);
-            _stream = _client.GetStream();
+            try
+            {
+                _client = new TcpClient();
+                
+                // Ustaw timeout dla połączenia
+                var connectTask = _client.ConnectAsync(_host, _port);
+                var timeoutTask = Task.Delay(5000); // 5 sekund timeout
+                
+                if (await Task.WhenAny(connectTask, timeoutTask) == timeoutTask)
+                {
+                    throw new TimeoutException("Connection timed out");
+                }
+                
+                _stream = _client.GetStream();
 
-            // Start listening for messages
-            _ = Task.Run(ReceiveMessagesAsync);
+                // Start listening for messages
+                _ = Task.Run(ReceiveMessagesAsync);
+                
+                // Notyfikuj o połączeniu
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs { IsConnected = true, Message = "Connected to server" });
+            }
+            catch (Exception ex)
+            {
+                ConnectionStatusChanged?.Invoke(this, new ConnectionEventArgs { IsConnected = false, Message = $"Error connecting: {ex.Message}" });
+                throw; // Przepuść wyjątek, aby MainViewModel mógł go obsłużyć
+            }
+        }
+
+        // Dodaj zdarzenie do informowania o zmianach statusu połączenia
+        public event EventHandler<ConnectionEventArgs> ConnectionStatusChanged;
+
+        // Klasa do przekazywania informacji o statusie połączenia
+        public class ConnectionEventArgs : EventArgs
+        {
+            public bool IsConnected { get; set; }
+            public string Message { get; set; }
         }
 
         public async Task SendControlAsync(Control control)

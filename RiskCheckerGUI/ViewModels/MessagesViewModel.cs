@@ -102,10 +102,11 @@ namespace RiskCheckerGUI.ViewModels
 
         #endregion
 
+                // W konstruktorze
         public MessagesViewModel(TcpService tcpService, UdpService udpService)
         {
-            _tcpService = tcpService;
-            _udpService = udpService;
+            _tcpService = tcpService ?? throw new ArgumentNullException(nameof(tcpService));
+            _udpService = udpService ?? throw new ArgumentNullException(nameof(udpService));
             _dispatcher = Dispatcher.CurrentDispatcher;
 
             // Inicjalizacja kolekcji
@@ -113,19 +114,16 @@ namespace RiskCheckerGUI.ViewModels
             _ccgMessages = new ObservableCollection<CcgMessage>();
             _orderBook = new ObservableCollection<OrderBookEntry>();
             _instrumentPositions = new ObservableCollection<InstrumentPosition>();
-            _capitalUsage = new CapitalUsage();
+            _capitalUsage = new CapitalUsage(); // Inicjalizacja, by uniknąć null
 
-            // Synchronizacja kolekcji
-            BindingOperations.EnableCollectionSynchronization(_logs, _syncLock);
-            BindingOperations.EnableCollectionSynchronization(_ccgMessages, _syncLock);
-            BindingOperations.EnableCollectionSynchronization(_orderBook, _syncLock);
-            BindingOperations.EnableCollectionSynchronization(_instrumentPositions, _syncLock);
+            // Przykładowe wartości dla testów UI
+            _capitalUsage.OpenCapital = 0;
+            _capitalUsage.AccruedCapital = 0;
+            _capitalUsage.TotalCapital = 0;
+            _capitalUsage.MessageLimit = 115200;
+            _capitalUsage.CapitalLimit = 100000;
 
-            // Ustaw filtry dla kolekcji
-            SetupCollectionFilters();
-
-            // Subskrybuj zdarzenia z serwisów
-            SubscribeToEvents();
+            // Reszta kodu...
         }
 
         private void SetupCollectionFilters()
@@ -137,9 +135,10 @@ namespace RiskCheckerGUI.ViewModels
                 if (string.IsNullOrEmpty(MessageFilter)) return true;
                 var message = obj as CcgMessage;
                 return message != null && 
-                       (message.OrderID?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
+                    (message.ClOrdID?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
                         message.Symbol?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
-                        message.Type?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true);
+                        message.Name?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true ||
+                        message.Header?.Contains(MessageFilter, StringComparison.OrdinalIgnoreCase) == true);
             };
 
             // Filtrowanie Instrument Positions
@@ -246,6 +245,7 @@ namespace RiskCheckerGUI.ViewModels
                 if (ccgMessage != null)
                 {
                     // Add to messages list
+                    ccgMessage.Nr = CcgMessages.Count + 1; // Upewnij się, że numer jest unikalny
                     CcgMessages.Insert(0, ccgMessage);
                     if (CcgMessages.Count > 1000)
                         CcgMessages.RemoveAt(CcgMessages.Count - 1);
@@ -261,37 +261,104 @@ namespace RiskCheckerGUI.ViewModels
 
         private CcgMessage ParseCcgMessage(byte[] messageBytes)
         {
-            // This is a placeholder - you'll need to implement actual CCG message parsing
-            // based on your protocol specification
             try
             {
-                // Example parsing logic - adjust according to your message format
+                // Konwertuj wiadomość do tekstu
                 string messageString = System.Text.Encoding.ASCII.GetString(messageBytes);
                 
-                // Simple parsing assuming CSV-like format (this is just an example)
-                string[] parts = messageString.Split('|');
-                if (parts.Length < 5)
-                    return null;
-
-                return new CcgMessage
+                // Najprostsze podejście - podziel wiadomość po określonym separatorze
+                // Zakładając format podobny do FIX (tag=value|tag=value)
+                // W rzeczywistości format może być inny, dostosuj do formatu twoich wiadomości
+                
+                // Przykładowy kod dla formatu tagowanego z separatorami
+                // Załóżmy, że wiadomość CCG ma format: 35=D|34=123|52=20250512-14:30:00|...
+                var parts = messageString.Split('|');
+                
+                var message = new CcgMessage
                 {
-                    Header = parts.Length > 0 ? parts[0] : "",
-                    Type = parts.Length > 1 ? parts[1] : "",
-                    MsgSeqNum = parts.Length > 2 && int.TryParse(parts[2], out int seqNum) ? seqNum : 0,
+                    Nr = _ccgMessages.Count + 1,  // Przydziel numer kolejny
                     DateReceived = DateTime.Now,
-                    TransactTime = parts.Length > 3 ? parts[3] : "",
-                    Price = parts.Length > 4 && decimal.TryParse(parts[4], out decimal price) ? price : 0m,
-                    Side = parts.Length > 5 ? parts[5] : "",
-                    Symbol = parts.Length > 6 ? parts[6] : "",
-                    OrderID = parts.Length > 7 ? parts[7] : "",
                     RawData = messageBytes
                 };
+                
+                foreach (var part in parts)
+                {
+                    var tagValue = part.Split('=');
+                    if (tagValue.Length != 2) continue;
+                    
+                    var tag = tagValue[0];
+                    var value = tagValue[1];
+                    
+                    switch (tag)
+                    {
+                        case "35": // MsgType
+                            message.Header = value;
+                            // Mapowanie typu wiadomości na nazwę
+                            message.Name = MapMessageTypeToName(value);
+                            break;
+                        case "34": // MsgSeqNum
+                            if (int.TryParse(value, out int seqNum))
+                                message.MsgSeqNum = seqNum;
+                            break;
+                        case "52": // TransactTime
+                            message.TransactTime = value;
+                            break;
+                        case "44": // Price 
+                            if (decimal.TryParse(value, out decimal price))
+                                message.Price = price;
+                            break;
+                        case "54": // Side
+                            message.Side = MapSideCodeToName(value);
+                            break;
+                        case "55": // Symbol
+                            message.Symbol = value;
+                            break;
+                        case "11": // ClOrdID
+                            message.ClOrdID = value;
+                            break;
+                        // Dodaj więcej tagów według potrzeb
+                    }
+                }
+                
+                return message;
             }
             catch (Exception ex)
             {
-                // Log the error
+                // Log błędu
                 Console.WriteLine($"Error parsing CCG message: {ex.Message}");
                 return null;
+            }
+        }
+
+        private string MapMessageTypeToName(string msgType)
+        {
+            switch (msgType)
+            {
+                case "D": return "New Order";
+                case "G": return "Order Cancel/Replace";
+                case "F": return "Order Cancel";
+                case "8": return "Execution Report";
+                case "9": return "Order Cancel Reject";
+                // Dodaj więcej typów według potrzeb
+                default: return msgType;
+            }
+        }
+
+        private string MapSideCodeToName(string sideCode)
+        {
+            switch (sideCode)
+            {
+                case "1": return "Buy";
+                case "2": return "Sell";
+                case "3": return "Buy minus";
+                case "4": return "Sell plus";
+                case "5": return "Sell short";
+                case "6": return "Sell short exempt";
+                case "7": return "Undisclosed";
+                case "8": return "Cross";
+                case "9": return "Cross short";
+                // Dodaj więcej kodów stron według potrzeb
+                default: return sideCode;
             }
         }
 
@@ -302,11 +369,11 @@ namespace RiskCheckerGUI.ViewModels
             // based on your protocol specification and business rules
             
             // Example: New Order, Modify, Cancel logic
-            if (message.Type == "D") // New Order
+            if (message.Header == "D") // New Order - używamy Header zamiast Type
             {
                 var orderEntry = new OrderBookEntry
                 {
-                    OrderID = message.OrderID,
+                    OrderID = message.ClOrdID, // używamy ClOrdID zamiast OrderID
                     TransactTime = message.TransactTime,
                     Side = message.Side,
                     Ticker = message.Symbol,
@@ -319,7 +386,7 @@ namespace RiskCheckerGUI.ViewModels
                     MarketID = "MARKET",
                     Account = "ACC",
                     LastModified = DateTime.Now.ToString("HH:mm:ss.ffffff"),
-                    OrigOrderID = message.OrderID,
+                    OrigOrderID = message.ClOrdID, // używamy ClOrdID zamiast OrderID
                     Text = ""
                 };
                 
@@ -328,10 +395,10 @@ namespace RiskCheckerGUI.ViewModels
                 // Update instrument positions if needed
                 UpdateInstrumentPositionFromOrder(orderEntry);
             }
-            else if (message.Type == "G") // Order Cancel/Replace
+            else if (message.Header == "G") // Order Cancel/Replace - używamy Header zamiast Type
             {
                 // Find the original order
-                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.OrderID);
+                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID); // używamy ClOrdID zamiast OrderID
                 if (originalOrder != null)
                 {
                     // Mark original as inactive
@@ -340,7 +407,7 @@ namespace RiskCheckerGUI.ViewModels
                     // Create new modified order
                     var modifiedOrder = new OrderBookEntry
                     {
-                        OrderID = message.OrderID + "M", // Just an example
+                        OrderID = message.ClOrdID + "M", // używamy ClOrdID zamiast OrderID
                         TransactTime = message.TransactTime,
                         Side = message.Side,
                         Ticker = message.Symbol,
@@ -359,10 +426,10 @@ namespace RiskCheckerGUI.ViewModels
                     OrderBook.Insert(0, modifiedOrder);
                 }
             }
-            else if (message.Type == "F") // Order Cancel
+            else if (message.Header == "F") // Order Cancel - używamy Header zamiast Type
             {
                 // Find the original order
-                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.OrderID);
+                var originalOrder = OrderBook.FirstOrDefault(o => o.OrderID == message.ClOrdID); // używamy ClOrdID zamiast OrderID
                 if (originalOrder != null)
                 {
                     // Mark as inactive

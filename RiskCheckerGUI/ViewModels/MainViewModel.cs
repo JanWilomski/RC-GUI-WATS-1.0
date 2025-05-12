@@ -57,16 +57,26 @@ namespace RiskCheckerGUI.ViewModels
 
         public MainViewModel()
         {
+            // Skonfiguruj domyślne ustawienia połączenia
+            Host = "172.31.136.7";
+            TcpPort = 19083;
+            
+            // Jeśli używany jest multicast, zaktualizuj te ustawienia
+            // na podstawie dokumentacji lub zapytaj dostawcę serwera
+            MulticastGroup = "239.0.0.1"; // Przykładowy adres multicast
+            UdpPort = 19084; // Przykładowy port, zapytaj o właściwy
+            
+            // Tworzenie usług z zaktualizowanymi ustawieniami
             _tcpService = new TcpService(Host, TcpPort);
             _udpService = new UdpService(MulticastGroup, UdpPort);
-
-            // Create child view models, ale nie inicjalizuj połączenia
+            
+            // Tworzenie view modeli
             MessagesViewModel = new MessagesViewModel(_tcpService, _udpService);
             SettingsViewModel = new SettingsViewModel(_tcpService);
             FiltersViewModel = new FiltersViewModel();
             InstrumentsViewModel = new InstrumentsViewModel();
-
-            // Create commands
+            
+            // Tworzenie komend
             ConnectCommand = new RelayCommand(async _ => await ConnectAsync(), _ => !IsConnected);
             DisconnectCommand = new RelayCommand(_ => Disconnect(), _ => IsConnected);
         }
@@ -75,22 +85,35 @@ namespace RiskCheckerGUI.ViewModels
         {
             try
             {
-                // Update services with current settings
+                // Aktualizacja ustawień serwisów
                 _tcpService.UpdateConnection(Host, TcpPort);
                 _udpService.UpdateConnection(MulticastGroup, UdpPort);
 
-                // Connect to services
+                // Informacja o próbie połączenia
+                StatusMessage = "Connecting...";
+                
+                // Połączenie z serwerem
                 await _tcpService.ConnectAsync();
                 _udpService.Start();
                 
                 IsConnected = true;
+                StatusMessage = $"Connected to {Host}:{TcpPort}";
             }
             catch (Exception ex)
             {
-                // Handle connection error
-                System.Windows.MessageBox.Show($"Connection error: {ex.Message}", "Error", 
-                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+                // Obsługa błędu połączenia
+                StatusMessage = $"Connection error: {ex.Message}";
+                System.Windows.MessageBox.Show($"Failed to connect: {ex.Message}\n\nPlease check server address and port.", 
+                    "Connection Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             }
+        }
+
+        // Dodaj właściwość do statusu
+        private string _statusMessage = "Not connected";
+        public string StatusMessage
+        {
+            get => _statusMessage;
+            set => SetProperty(ref _statusMessage, value);
         }
 
         private void Disconnect()

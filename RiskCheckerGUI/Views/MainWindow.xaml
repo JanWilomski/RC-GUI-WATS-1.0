@@ -3,22 +3,69 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:RiskCheckerGUI.Views"
+        xmlns:views="clr-namespace:RiskCheckerGUI.Views"
         mc:Ignorable="d"
         Title="Risk Checker GUI" Height="600" Width="800">
     <Grid>
-        <TabControl>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Panel konfiguracji połączenia -->
+        <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="#CCCCCC" Background="#F5F5F5">
+            <Grid Margin="10,5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <TextBlock Grid.Column="0" Text="Host:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBox Grid.Column="1" Text="{Binding Host}" Width="120" Margin="0,0,10,0"/>
+                
+                <TextBlock Grid.Column="2" Text="TCP Port:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBox Grid.Column="3" Text="{Binding TcpPort}" Width="60" Margin="0,0,10,0"/>
+                
+                <TextBlock Grid.Column="4" Text="Multicast:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBox Grid.Column="5" Text="{Binding MulticastGroup}" Width="100" Margin="0,0,10,0"/>
+                
+                <TextBlock Grid.Column="6" Text="UDP Port:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <TextBox Grid.Column="7" Text="{Binding UdpPort}" Width="60" Margin="0,0,10,0"/>
+                
+                <StackPanel Grid.Column="8" Orientation="Horizontal">
+                    <!-- Usunięte odniesienie do InverseBoolConverter -->
+                    <Button Command="{Binding ConnectCommand}" Content="Connect" Width="80" Margin="0,0,5,0"
+                            IsEnabled="{Binding IsConnected, Converter={x:Null}}"/>
+                    <Button Command="{Binding DisconnectCommand}" Content="Disconnect" Width="80"
+                            IsEnabled="{Binding IsConnected}"/>
+                </StackPanel>
+                
+                <!-- Usunięte odniesienie do ConnectionStatusConverter -->
+                <TextBlock Grid.Column="9" Grid.ColumnSpan="2" Text="{Binding StatusMessage}" 
+                           VerticalAlignment="Center" Margin="10,0,0,0"/>
+            </Grid>
+        </Border>
+        
+        <!-- Zakładki aplikacji -->
+        <TabControl Grid.Row="1">
             <TabItem Header="Messages">
-                <local:MessagesView/>
+                <views:MessagesView/>
             </TabItem>
             <TabItem Header="Settings">
-                <TextBlock Text="Settings Content" />
+                <views:SettingsView/>
             </TabItem>
             <TabItem Header="Filters">
-                <TextBlock Text="Filters Content" />
+                <views:FiltersView/>
             </TabItem>
             <TabItem Header="Instruments">
-                <TextBlock Text="Instruments Content" />
+                <views:InstrumentsView/>
             </TabItem>
         </TabControl>
     </Grid>

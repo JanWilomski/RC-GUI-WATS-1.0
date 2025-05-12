@@ -21,8 +21,8 @@ namespace RiskCheckerGUI.Services
 
         public UdpService(string multicastGroup, int port)
         {
-            _multicastGroup = multicastGroup;
-            _port = port;
+            CurrentMulticastGroup = multicastGroup;
+            CurrentPort = port;
         }
 
         public void Start()
@@ -32,8 +32,8 @@ namespace RiskCheckerGUI.Services
 
             _client = new UdpClient();
             _client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            _client.Client.Bind(new IPEndPoint(IPAddress.Any, _port));
-            _client.JoinMulticastGroup(IPAddress.Parse(_multicastGroup));
+            _client.Client.Bind(new IPEndPoint(IPAddress.Any, CurrentPort));
+            _client.JoinMulticastGroup(IPAddress.Parse(CurrentMulticastGroup));
 
             _isRunning = true;
             _ = Task.Run(ReceiveMessagesAsync);
@@ -150,6 +150,9 @@ namespace RiskCheckerGUI.Services
             });
         }
 
+        public string CurrentMulticastGroup { get; private set; }
+        public int CurrentPort { get; private set; }
+
         private void ProcessCapitalMessage(byte[] buffer, ref int offset)
         {
             // Capital message is 25 bytes total
@@ -196,14 +199,15 @@ namespace RiskCheckerGUI.Services
         }
 
         public void UpdateConnection(string multicastGroup, int port)
+         {
+            if (_isRunning)
             {
-                if (_isRunning)
-                {
-                    Stop();
-                }
-                
-                _multicastGroup = multicastGroup ?? throw new ArgumentNullException(nameof(multicastGroup));
-                _port = port;
+                Stop();
             }
+            
+            // Użyj właściwości zamiast pól readonly
+            CurrentMulticastGroup = multicastGroup ?? throw new ArgumentNullException(nameof(multicastGroup));
+            CurrentPort = port;
+        }
     }
 }
