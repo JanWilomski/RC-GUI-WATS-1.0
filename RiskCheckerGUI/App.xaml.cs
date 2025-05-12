@@ -2,6 +2,7 @@
 using System.Windows;
 using System.Windows.Threading;
 using RiskCheckerGUI.ViewModels;
+using RiskCheckerGUI.Views;
 
 namespace RiskCheckerGUI
 {
@@ -23,7 +24,7 @@ namespace RiskCheckerGUI
                 _mainViewModel = new MainViewModel();
                 
                 // Create main window
-                var mainWindow = new Views.MainWindow
+                var mainWindow = new MainWindow
                 {
                     DataContext = _mainViewModel
                 };
@@ -32,7 +33,8 @@ namespace RiskCheckerGUI
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Błąd podczas inicjalizacji aplikacji: {ex.Message}\n\n{ex.StackTrace}", "Błąd krytyczny", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Błąd podczas inicjalizacji aplikacji: {ex.Message}\n\n{ex.StackTrace}", 
+                    "Błąd krytyczny", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
